@@ -1,0 +1,62 @@
+#!/bin/sh
+
+# PROVIDE: delaysim
+# REQUIRE: networking ipfw
+# BEFORE: login
+
+. /etc/rc.subr
+name="delaysim"
+rcvar="delaysim_enable"
+
+start_cmd="${name}_start"
+stop_cmd=":"
+
+load_rc_config $name
+: ${delaysim_enable:="NO"}
+
+delaysim_start(){
+
+    #declaration of the interface variables
+    IF1="em0"
+    IF2="em1"
+
+    #flush the firewall to be sure all rules are cleared
+    ipfw -f flush
+    
+    #load the dummynet module
+    kldload dummynet
+    
+    #create the bridge
+    ifconfig bridge create
+    
+    #adding the interface to the bridge and bring it up
+    ifconfig bridge0 addm $IF1 addm $IF2 up #configure the bridge with an ip (optional)
+
+    #configure the bridge with an ip (optional)
+    ifconfig bridge0 172.27.2.1/24
+
+    #bring the bridge interfaces up
+    ifconfig $IF1 up
+    ifconfig $IF2 up
+
+    #allow the firewall access the bridge (layer 2 filtering)
+    sysctl net.link.bridge.ipfw=1
+    
+    #allow the firewall to access all interfaces
+    sysctl net.link.ether.ipfw=1
+    
+    #ensure that the package only pass the fw rules once
+    sysctl net.inet.ip.fw.one_pass=1
+
+    #IMPORTANT the last firewall rule is to allow everything
+    ipfw add 65534 allow all from any to any
+
+    #setting up of the rules for the pipe traffic
+    ipfw add 2000 pipe 1 ip from any to any via $IF1 out 
+    ipfw add 2001 pipe 2 all from any to any via $IF2 out
+    
+    #configuration of the pipes
+    ipfw pipe 1 config delay 20ms bw 1024Kbit/s plr 0.01 
+    ipfw pipe 2 config delay 20ms bw 1024Kbit/s
+}
+run_rc_command "$1"
